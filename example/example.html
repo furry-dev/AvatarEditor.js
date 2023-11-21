@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>avatarEditor.js</title>
+
+    <link rel="stylesheet" href="https://cdn.ruden.pro/css/main-style.css">
+    <link rel="stylesheet" href="https://cdn.ruden.pro/theme/colors.css">
+    <link rel="stylesheet" href="https://cdn.ruden.pro/css/main-theme.css">
+
+    <link rel="stylesheet" href="style.min.css">
+</head>
+<body>
+<main>
+    <canvas width="500" height="300"></canvas>
+</main>
+<script src="../AvatarEditor.js"></script>
+<script>
+    const canvas = document.querySelector('canvas')
+    const editor = new AvatarEditor(canvas, {mask: "mask.svg"})
+</script>
+</body>
+</html>
