@@ -1,1 +1,1 @@
-# avatarEditor.js
+# AvatarEditor.js
