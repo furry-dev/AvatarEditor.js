@@ -4,6 +4,8 @@ class AvatarEditor {
     avatarInput
     mask = {}
 
+    placeholder
+
     isDragging = false
     startDragX = 0
     startDragY = 0
@@ -14,24 +16,25 @@ class AvatarEditor {
 
     centerZoom = {x: 0, y: 0}
 
-    constructor(canvas,
-                options = {
-                    scaleFactor: 1.1,
-                    mask: '',
-                    maskW: 200,
-                    maskH: 200,
-                    maskStrokeWidth: 2,
-                    maskStrokeColor: 'white',
-                    maskOverflow: 'rgba(0, 0, 0, 0.6)'
-                }
-    ) {
+    constructor(canvas, settings = {}) {
+        const options = {
+            scaleFactor: 1.1,
+            maskW: 200,
+            maskH: 200,
+            maskStrokeWidth: 1,
+            maskStrokeColor: '#ccc',
+            maskOverflow: 'rgba(0, 0, 0, 0.6)',
+            placeholder: "Выберите изображение двойным кликом",
+            ...settings
+        }
+
         this.canvas = canvas
         this.ctx = canvas.getContext('2d')
 
 
-        this.maskW = options.maskW || 200
-        this.maskH = options.maskH || 200
-        this.scaleFactor = options.scaleFactor || 1.1
+        this.maskW = options.maskW
+        this.maskH = options.maskH
+        this.scaleFactor = options.scaleFactor
 
         this.setupCanvas()
         this.setupEvents()
@@ -43,12 +46,12 @@ class AvatarEditor {
                 const tempCanvas = document.createElement('canvas')
                 const tempCtx = tempCanvas.getContext('2d')
 
-                const lineW = options.maskStrokeWidth || 1
+                const lineW = options.maskStrokeWidth
 
                 tempCanvas.height = this.maskH + lineW * 2
                 tempCanvas.width = this.maskW + lineW * 2
 
-                tempCtx.fillStyle = options.maskStrokeColor || '#ccc'
+                tempCtx.fillStyle = options.maskStrokeColor
 
                 tempCtx.drawImage(this.mask.image, 0, 0, tempCanvas.width, tempCanvas.height)
                 tempCtx.globalCompositeOperation = 'destination-out'
@@ -75,6 +78,9 @@ class AvatarEditor {
 
             this.mask.image.src = options.mask
         }
+
+        this.placeholder = options.placeholder
+        this.drawTextCentered(this.placeholder, {color: "white"})
     }
 
     setupCanvas() {
@@ -105,6 +111,10 @@ class AvatarEditor {
                     }
 
                     this.image.src = e.target.result
+
+                    this.imageX = 0
+                    this.imageY = 0
+                    this.imageScale = 1
                 }
                 reader.readAsDataURL(file)
             }
@@ -141,7 +151,7 @@ class AvatarEditor {
         // Масштабирование изображения
         this.canvas.addEventListener('wheel', (e) => {
 
-            const scaleFactor = e.deltaY > 0 ? 1 / this.scaleFactor : 1 * this.scaleFactor // Фактор масштабирования
+            const scaleFactor = e.deltaY > 0 ? 1 / this.scaleFactor : this.scaleFactor // Фактор масштабирования
 
             const rect = this.canvas.getBoundingClientRect()
 
@@ -161,6 +171,12 @@ class AvatarEditor {
 
     render() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+
+        if (!this.image) {
+            this.mask.stroke()
+            this.drawTextCentered(this.placeholder, {color: "red"})
+            return
+        }
 
         const drawImage = () => {
             this.ctx.drawImage(
@@ -228,5 +244,63 @@ class AvatarEditor {
         )
 
         return exportCanvas.toDataURL('image/png')
+    }
+
+    drawTextCentered(text, options = {}) {
+        const style = {
+            font: '18px Open Sans',
+            color: 'black',
+            width: "mask",
+            canvasPadding: 20,
+            ...options
+        }
+
+        let maxWidth = ((style.width === "mask" && this.mask.image) ? this.maskW : this.canvas.width) - 2 * style.canvasPadding
+
+        this.ctx.save()
+
+        const centerX = this.canvas.width / 2
+        const centerY = this.canvas.height / 2
+
+        this.ctx.font = style.font
+        this.ctx.fillStyle = style.color
+        this.ctx.textAlign = 'center'
+        this.ctx.textBaseline = 'middle'
+
+        this.wrapText(text, centerX, centerY, maxWidth)
+
+        this.ctx.restore()
+    }
+
+    wrapText(text, x, y, maxWidth, lineHeight = 1.2) {
+        let words = text.split(' ')
+        let line = ''
+        let offsetY = 0
+        let fontHeight
+
+        const lines = []
+
+        for (let i = 0; i <= words.length; i++) {
+            let testLine = line + words[i] + ' '
+            let metrics = this.ctx.measureText(testLine)
+            let testWidth = metrics.width
+            fontHeight = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent
+
+            if (testWidth > maxWidth && i > 0) {
+                lines.push({
+                    text: line,
+                    y: y + offsetY
+                })
+                line = words[i] + ' '
+                offsetY += fontHeight * lineHeight
+            } else {
+                line = testLine
+            }
+        }
+
+        lines.forEach((value) => {
+            if (this.ctx.textBaseline === 'middle') value.y = value.y - (offsetY - fontHeight * lineHeight) / 2
+            this.ctx.fillText(value.text, x, value.y)
+        })
     }
 }

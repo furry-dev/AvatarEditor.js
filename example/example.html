@@ -16,11 +16,22 @@
 <body>
 <main>
     <canvas width="500" height="300"></canvas>
+    <div class="export">
+        <div class="buttons">
+            <button type="submit">Save</button>
+        </div>
+        <img src="" alt="result" class="result">
+    </div>
 </main>
 <script src="../AvatarEditor.js"></script>
 <script>
     const canvas = document.querySelector('canvas')
     const editor = new AvatarEditor(canvas, {mask: "mask.svg"})
+
+    document.querySelector('.export button[type="submit"]').addEventListener('click', () => {
+        document.querySelector('.export .result').src = editor.exportImage()
+    })
+
 </script>
 </body>
 </html>
