@@ -1,9 +1,30 @@
+/**
+ * Строка представляющая цвет в формате RGB.
+ */
 type RGB = `rgb(${number}, ${number}, ${number})`
+/**
+ * Строка представляющая цвет в формате RGBA.
+ */
 type RGBA = `rgba(${number}, ${number}, ${number}, ${number})`
+/**
+ * Строка представляющая цвет в формате HEX.
+ */
 type HEX = `#${string}`
 
+/**
+ * Тип для представления цвета.
+ */
 type Color = RGB | RGBA | HEX
 
+
+/**
+ * @interface Mask - Интерфейс для маски аватара.
+ * @property {HTMLImageElement} image - Элемент HTMLImageElement для маски.
+ * @property {number} w - Ширина маски.
+ * @property {number} h - Высота маски.
+ * @property {Color} overflow - Цвет, представляющий затемнение изображения вне маски.
+ * @property {Function} stroke - Метод для отображения обводки маски.
+ */
 interface Mask {
     image: HTMLImageElement,
     w: number,
@@ -12,29 +33,65 @@ interface Mask {
     stroke: () => void
 }
 
+/**
+ * @interface Options - Интерфейс для параметров конфигурации AvatarEditor.
+ * @property {number} scaleFactor - Множитель масштабирования.
+ * @property {number} maskW - Ширина маски.
+ * @property {number} maskH - Высота маски.
+ * @property {number} maskStrokeWidth - Ширина обводки маски.
+ * @property {string} maskStrokeColor - Цвет обводки маски.
+ * @property {string} maskOverflow - Цвет затемнения маски.
+ * @property {string} placeholder - Текст-заглушка.
+ * @property {string} [mask] - Путь к изображению для использования в качестве маски.
+ */
+interface Options {
+    scaleFactor: number,
+    maskW: number,
+    maskH: number,
+    maskStrokeWidth: number,
+    maskStrokeColor: Color,
+    maskOverflow: Color,
+    placeholder: string,
+    mask?: string
+}
 
+interface FontStyle {
+    font: string,
+    color: string,
+    width: string,
+    canvasPadding: number
+}
+
+/**
+ * @class AvatarEditor - Класс создающий редактор аватара.
+ */
 class AvatarEditor {
     canvas: HTMLCanvasElement
     ctx: CanvasRenderingContext2D
     avatarInput: HTMLInputElement
 
-    mask: Mask
+    mask: Partial<Mask> = {}
     image: HTMLImageElement
 
-    l: string
     placeholder: string
     scaleFactor: number
 
     isDragging = false
-    startDragX = 0
-    startDragY = 0
+    private startDragX = 0
+    private startDragY = 0
+    isPinching = false
+    private initialPinchDistance = 0
+
+    private lastTap: number
+    private lastGestureTime: number = 0
+    gestureTimeout: number = 300
 
     imageX = 0
     imageY = 0
     imageScale = 1
 
-    constructor(canvas: HTMLCanvasElement, settings = {}) {
-        const options = {
+    constructor(canvas: HTMLCanvasElement, settings: object = {}) {
+        const options: Options = {
             scaleFactor: 1.1,
             maskW: 200,
             maskH: 200,
@@ -42,7 +99,6 @@ class AvatarEditor {
             maskStrokeColor: '#ccc',
             maskOverflow: 'rgba(0, 0, 0, 0.6)',
             placeholder: "Выберите изображение двойным кликом",
-            mask: '',
             ...settings
         }
 
@@ -55,53 +111,18 @@ class AvatarEditor {
         this.setupEvents()
 
         if (options.mask) {
-            const tempCanvas = document.createElement('canvas')
-
-            this.mask = {
-                image: new Image(),
-                w: options.maskW,
-                h: options.maskH,
-                overflow: options.maskOverflow as Color,
-                stroke: () => {
-                    const dx = (this.canvas.width - tempCanvas.width) / 2
-                    const dy = (this.canvas.height - tempCanvas.height) / 2
-
-                    this.ctx.drawImage(tempCanvas, dx, dy)
-                }
-            }
-
-            this.mask.image.onload = () => {
-                const tempCtx = tempCanvas.getContext('2d')
-
-                const lineW = options.maskStrokeWidth
-
-                tempCanvas.width = this.mask.w + lineW * 2
-                tempCanvas.height = this.mask.h + lineW * 2
-
-                tempCtx.fillStyle = options.maskStrokeColor
-
-                tempCtx.drawImage(this.mask.image, 0, 0, tempCanvas.width, tempCanvas.height)
-                tempCtx.globalCompositeOperation = 'destination-out'
-                tempCtx.drawImage(
-                    this.mask.image,
-                    lineW,
-                    lineW,
-                    tempCanvas.width - lineW * 2,
-                    tempCanvas.height - lineW * 2)
-                tempCtx.globalCompositeOperation = 'source-in'
-                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height)
-
-                this.mask.stroke()
-            }
-
-            this.mask.image.src = options.mask
+            this.setupMask(options.mask, options.maskW, options.maskH, options.maskStrokeWidth, options.maskStrokeColor, options.maskOverflow)
         }
 
         this.placeholder = options.placeholder
         this.drawTextCentered(this.placeholder, {color: "white"})
     }
 
-    setupCanvas() {
+    /**
+     * Настраивает элемент canvas и добавляет его в контейнер.
+     * @private
+     */
+    private setupCanvas() {
         const editorContainer = document.createElement('div')
         editorContainer.classList.add('avatar-editor')
 
@@ -111,9 +132,14 @@ class AvatarEditor {
 
         this.avatarInput = document.createElement('input')
         this.avatarInput.type = 'file'
+        this.avatarInput.accept = "image/*"
     }
 
-    setupEvents() {
+    /**
+     * Настраивает обработчики событий.
+     * @private
+     */
+    private setupEvents() {
         this.canvas.addEventListener('dblclick', () => {
             this.avatarInput.click()
         })
@@ -168,6 +194,7 @@ class AvatarEditor {
 
         // Масштабирование изображения
         this.canvas.addEventListener('wheel', (e) => {
+            e.preventDefault()
 
             const scaleFactor = e.deltaY > 0 ? 1 / this.scaleFactor : this.scaleFactor // Фактор масштабирования
 
@@ -185,8 +212,137 @@ class AvatarEditor {
 
             this.render()
         })
+
+        this.canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                this.isPinching = true
+                this.initialPinchDistance = this.calculatePinchDistance(e.touches[0], e.touches[1])
+            } else if (e.touches.length === 1) {
+                const touch = e.touches[0]
+                this.startDragX = touch.clientX
+                this.startDragY = touch.clientY
+            }
+        })
+
+        // Движение пальцев
+        this.canvas.addEventListener('touchmove', (e) => {
+            if (this.isPinching && e.touches.length === 2) {
+                e.preventDefault()
+
+                const currentPinchDistance = this.calculatePinchDistance(e.touches[0], e.touches[1])
+                const scaleFactor = currentPinchDistance / this.initialPinchDistance
+
+                const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2
+                const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2
+
+                // Рассчитываем новый масштаб и положение
+                this.imageScale *= scaleFactor
+
+                // Определяем новое положение изображения
+                this.imageX = centerX - (centerX - this.imageX) * scaleFactor
+                this.imageY = centerY - (centerY - this.imageY) * scaleFactor
+
+                this.render()
+
+                // Сохраните текущее расстояние для следующего кадра
+                this.initialPinchDistance = currentPinchDistance
+
+                // Сохраняем время последнего жеста
+                this.lastGestureTime = new Date().getTime()
+            } else if (e.touches.length === 1 && !this.isPinching) {
+                // Логика перемещения с одним пальцем
+                const touch = e.touches[0]
+
+                // Рассчитываем вектор перемещения
+                const deltaX = touch.clientX - this.startDragX
+                const deltaY = touch.clientY - this.startDragY
+
+                // Обновляем положение изображения
+                this.imageX += deltaX
+                this.imageY += deltaY
+
+                this.render()
+
+                // Сохраняем текущие координаты для следующего кадра
+                this.startDragX = touch.clientX
+                this.startDragY = touch.clientY
+
+                // Сохраняем время последнего жеста
+                this.lastGestureTime = new Date().getTime()
+            }
+        })
+
+        // Конец касания
+        this.canvas.addEventListener('touchend', (e) => {
+            const currentTime = new Date().getTime()
+            const tapLength = currentTime - this.lastTap
+            const gestureTimeout = currentTime - this.lastGestureTime
+
+            if (tapLength < 500 && tapLength > 0) {
+                e.preventDefault()
+                if (!this.isPinching && gestureTimeout > this.gestureTimeout) this.avatarInput.click()
+            } else {
+                this.isPinching = false
+                this.lastTap = currentTime
+            }
+        })
     }
 
+    /**
+     * Настраивает маску для редактора аватара.
+     * @param {string} maskPath - Путь к изображению маски.
+     * @param {number} maskWidth - Ширина маски.
+     * @param {number} maskHeight - Высота маски.
+     * @param {number} maskStrokeWidth - Ширина обводки маски.
+     * @param {Color} maskStrokeColor - Цвет обводки маски.
+     * @param {Color} maskOverflow - Цвет затемнения маски.
+     * @private
+     */
+    private setupMask(maskPath: string, maskWidth: number, maskHeight: number, maskStrokeWidth: number, maskStrokeColor: Color, maskOverflow: Color) {
+        this.mask.image = new Image()
+        this.mask.w = maskWidth
+        this.mask.h = maskHeight
+        this.mask.overflow = maskOverflow
+
+        const tempCanvas: HTMLCanvasElement = document.createElement('canvas')
+        const tempCtx: CanvasRenderingContext2D = tempCanvas.getContext('2d')
+
+        const lineW = maskStrokeWidth
+
+        tempCanvas.width = this.mask.w + lineW * 2
+        tempCanvas.height = this.mask.h + lineW * 2
+
+        tempCtx.fillStyle = maskStrokeColor
+
+        this.mask.stroke = () => {
+            const dx = (this.canvas.width - tempCanvas.width) / 2
+            const dy = (this.canvas.height - tempCanvas.height) / 2
+
+            this.ctx.drawImage(tempCanvas, dx, dy)
+        };
+
+        this.mask.image.onload = () => {
+            tempCtx.drawImage(this.mask.image, 0, 0, tempCanvas.width, tempCanvas.height)
+            tempCtx.globalCompositeOperation = 'destination-out'
+            tempCtx.drawImage(
+                this.mask.image,
+                lineW,
+                lineW,
+                tempCanvas.width - lineW * 2,
+                tempCanvas.height - lineW * 2,
+            );
+            tempCtx.globalCompositeOperation = 'source-in'
+            tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height)
+
+            this.mask.stroke()
+        };
+
+        this.mask.image.src = maskPath
+    }
+
+    /**
+     * Обновляет изображение в редакторе.
+     */
     render() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
 
@@ -240,7 +396,15 @@ class AvatarEditor {
         }
     }
 
-    exportImage() {
+    /**
+     * Экспортирует текущее изображение из редактора в указанный формат.
+     * @param {("png"|"jpeg"|"bmp"|"webp")} format - Формат экспорта: "png", "jpeg", "bmp" или "webp".
+     * @param {number} [quality=1] - Качество изображения (для формата "jpeg" или "webp"). Должно быть в диапазоне от 0 до 1.
+     * @returns {string|false} - Строка, представляющая изображение в указанном формате, или false, если изображение отсутствует.
+     */
+    exportImage(format: "png" | "jpeg" | "bmp" | "webp", quality: number = 1.0): string | false {
+        if (!this.image) return false
+
         if (!this.mask.image) {
             return this.canvas.toDataURL('image/png')
         }
@@ -261,11 +425,16 @@ class AvatarEditor {
             this.image.height * this.imageScale
         )
 
-        return exportCanvas.toDataURL('image/png')
+        return exportCanvas.toDataURL(`image/${format}`, quality)
     }
 
-    drawTextCentered(text, options = {}) {
-        const style = {
+    /**
+     * Отрисовывает текст в центре canvas.
+     * @param {string} text - Текст для отрисовки.
+     * @param {object} [options={}] - Дополнительные параметры для отрисовки текста.
+     */
+    drawTextCentered(text: string, options: object = {}) {
+        const style: FontStyle = {
             font: '18px Open Sans',
             color: 'black',
             width: "mask",
@@ -290,11 +459,19 @@ class AvatarEditor {
         this.ctx.restore()
     }
 
-    wrapText(text, x, y, maxWidth, lineHeight = 1.2) {
+    /**
+     * Рисует текст автоматически перенося его на новую строку, если он вылез за пределы maxWidth.
+     * @param {string} text - Текст для отрисовки.
+     * @param {number} x - Координата x.
+     * @param {number} y - Координата y.
+     * @param {number} maxWidth - Максимальная ширина текста.
+     * @param {number} [lineHeight=1.2] - Межстрочный интервал.
+     */
+    wrapText(text: string, x: number, y: number, maxWidth: number, lineHeight: number = 1.2) {
         let words = text.split(' ')
         let line = ''
         let offsetY = 0
-        let fontHeight
+        let fontHeight: number
 
         const lines = []
 
@@ -320,5 +497,18 @@ class AvatarEditor {
             if (this.ctx.textBaseline === 'middle') value.y = value.y - (offsetY - fontHeight * lineHeight) / 2
             this.ctx.fillText(value.text, x, value.y)
         })
+    }
+
+    /**
+     * Вычисляет расстояние между двумя касаниями.
+     * @private
+     * @param {Touch} touch1 - Первый палец.
+     * @param {Touch} touch2 - Второй палец.
+     * @returns {number} - Расстояние между двумя касаниями.
+     */
+    private calculatePinchDistance(touch1: Touch, touch2: Touch): number {
+        const dx = touch2.clientX - touch1.clientX
+        const dy = touch2.clientY - touch1.clientY
+        return Math.sqrt(dx * dx + dy * dy)
     }
 }

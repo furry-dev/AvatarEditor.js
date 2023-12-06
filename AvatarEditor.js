@@ -9,53 +9,39 @@ var __assign = (this && this.__assign) || function () {
     };
     return __assign.apply(this, arguments);
 };
+/**
+ * @class AvatarEditor - Класс создающий редактор аватара.
+ */
 var AvatarEditor = /** @class */ (function () {
     function AvatarEditor(canvas, settings) {
         if (settings === void 0) { settings = {}; }
-        var _this = this;
+        this.mask = {};
         this.isDragging = false;
         this.startDragX = 0;
         this.startDragY = 0;
+        this.isPinching = false;
+        this.initialPinchDistance = 0;
+        this.lastGestureTime = 0;
+        this.gestureTimeout = 300;
         this.imageX = 0;
         this.imageY = 0;
         this.imageScale = 1;
-        var options = __assign({ scaleFactor: 1.1, maskW: 200, maskH: 200, maskStrokeWidth: 1, maskStrokeColor: '#ccc', maskOverflow: 'rgba(0, 0, 0, 0.6)', placeholder: "Выберите изображение двойным кликом", mask: '' }, settings);
+        var options = __assign({ scaleFactor: 1.1, maskW: 200, maskH: 200, maskStrokeWidth: 1, maskStrokeColor: '#ccc', maskOverflow: 'rgba(0, 0, 0, 0.6)', placeholder: "Выберите изображение двойным кликом" }, settings);
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.scaleFactor = options.scaleFactor;
         this.setupCanvas();
         this.setupEvents();
         if (options.mask) {
-            var tempCanvas_1 = document.createElement('canvas');
-            this.mask = {
-                image: new Image(),
-                w: options.maskW,
-                h: options.maskH,
-                overflow: options.maskOverflow,
-                stroke: function () {
-                    var dx = (_this.canvas.width - tempCanvas_1.width) / 2;
-                    var dy = (_this.canvas.height - tempCanvas_1.height) / 2;
-                    _this.ctx.drawImage(tempCanvas_1, dx, dy);
-                }
-            };
-            this.mask.image.onload = function () {
-                var tempCtx = tempCanvas_1.getContext('2d');
-                var lineW = options.maskStrokeWidth;
-                tempCanvas_1.width = _this.mask.w + lineW * 2;
-                tempCanvas_1.height = _this.mask.h + lineW * 2;
-                tempCtx.fillStyle = options.maskStrokeColor;
-                tempCtx.drawImage(_this.mask.image, 0, 0, tempCanvas_1.width, tempCanvas_1.height);
-                tempCtx.globalCompositeOperation = 'destination-out';
-                tempCtx.drawImage(_this.mask.image, lineW, lineW, tempCanvas_1.width - lineW * 2, tempCanvas_1.height - lineW * 2);
-                tempCtx.globalCompositeOperation = 'source-in';
-                tempCtx.fillRect(0, 0, tempCanvas_1.width, tempCanvas_1.height);
-                _this.mask.stroke();
-            };
-            this.mask.image.src = options.mask;
+            this.setupMask(options.mask, options.maskW, options.maskH, options.maskStrokeWidth, options.maskStrokeColor, options.maskOverflow);
         }
         this.placeholder = options.placeholder;
         this.drawTextCentered(this.placeholder, { color: "white" });
     }
+    /**
+     * Настраивает элемент canvas и добавляет его в контейнер.
+     * @private
+     */
     AvatarEditor.prototype.setupCanvas = function () {
         var editorContainer = document.createElement('div');
         editorContainer.classList.add('avatar-editor');
@@ -63,7 +49,12 @@ var AvatarEditor = /** @class */ (function () {
         editorContainer.appendChild(this.canvas);
         this.avatarInput = document.createElement('input');
         this.avatarInput.type = 'file';
+        this.avatarInput.accept = "image/*";
     };
+    /**
+     * Настраивает обработчики событий.
+     * @private
+     */
     AvatarEditor.prototype.setupEvents = function () {
         var _this = this;
         this.canvas.addEventListener('dblclick', function () {
@@ -110,6 +101,7 @@ var AvatarEditor = /** @class */ (function () {
         });
         // Масштабирование изображения
         this.canvas.addEventListener('wheel', function (e) {
+            e.preventDefault();
             var scaleFactor = e.deltaY > 0 ? 1 / _this.scaleFactor : _this.scaleFactor; // Фактор масштабирования
             var rect = _this.canvas.getBoundingClientRect();
             // Получаем координаты курсора
@@ -121,7 +113,109 @@ var AvatarEditor = /** @class */ (function () {
             _this.imageY = cursorY - (cursorY - _this.imageY) * scaleFactor;
             _this.render();
         });
+        this.canvas.addEventListener('touchstart', function (e) {
+            if (e.touches.length === 2) {
+                _this.isPinching = true;
+                _this.initialPinchDistance = _this.calculatePinchDistance(e.touches[0], e.touches[1]);
+            }
+            else if (e.touches.length === 1) {
+                var touch = e.touches[0];
+                _this.startDragX = touch.clientX;
+                _this.startDragY = touch.clientY;
+            }
+        });
+        // Движение пальцев
+        this.canvas.addEventListener('touchmove', function (e) {
+            if (_this.isPinching && e.touches.length === 2) {
+                e.preventDefault();
+                var currentPinchDistance = _this.calculatePinchDistance(e.touches[0], e.touches[1]);
+                var scaleFactor = currentPinchDistance / _this.initialPinchDistance;
+                var centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                var centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                // Рассчитываем новый масштаб и положение
+                _this.imageScale *= scaleFactor;
+                // Определяем новое положение изображения
+                _this.imageX = centerX - (centerX - _this.imageX) * scaleFactor;
+                _this.imageY = centerY - (centerY - _this.imageY) * scaleFactor;
+                _this.render();
+                // Сохраните текущее расстояние для следующего кадра
+                _this.initialPinchDistance = currentPinchDistance;
+                // Сохраняем время последнего жеста
+                _this.lastGestureTime = new Date().getTime();
+            }
+            else if (e.touches.length === 1 && !_this.isPinching) {
+                // Логика перемещения с одним пальцем
+                var touch = e.touches[0];
+                // Рассчитываем вектор перемещения
+                var deltaX = touch.clientX - _this.startDragX;
+                var deltaY = touch.clientY - _this.startDragY;
+                // Обновляем положение изображения
+                _this.imageX += deltaX;
+                _this.imageY += deltaY;
+                _this.render();
+                // Сохраняем текущие координаты для следующего кадра
+                _this.startDragX = touch.clientX;
+                _this.startDragY = touch.clientY;
+                // Сохраняем время последнего жеста
+                _this.lastGestureTime = new Date().getTime();
+            }
+        });
+        // Конец касания
+        this.canvas.addEventListener('touchend', function (e) {
+            var currentTime = new Date().getTime();
+            var tapLength = currentTime - _this.lastTap;
+            var gestureTimeout = currentTime - _this.lastGestureTime;
+            if (tapLength < 500 && tapLength > 0) {
+                e.preventDefault();
+                if (!_this.isPinching && gestureTimeout > _this.gestureTimeout)
+                    _this.avatarInput.click();
+            }
+            else {
+                _this.isPinching = false;
+                _this.lastTap = currentTime;
+            }
+        });
     };
+    /**
+     * Настраивает маску для редактора аватара.
+     * @param {string} maskPath - Путь к изображению маски.
+     * @param {number} maskWidth - Ширина маски.
+     * @param {number} maskHeight - Высота маски.
+     * @param {number} maskStrokeWidth - Ширина обводки маски.
+     * @param {Color} maskStrokeColor - Цвет обводки маски.
+     * @param {Color} maskOverflow - Цвет затемнения маски.
+     * @private
+     */
+    AvatarEditor.prototype.setupMask = function (maskPath, maskWidth, maskHeight, maskStrokeWidth, maskStrokeColor, maskOverflow) {
+        var _this = this;
+        this.mask.image = new Image();
+        this.mask.w = maskWidth;
+        this.mask.h = maskHeight;
+        this.mask.overflow = maskOverflow;
+        var tempCanvas = document.createElement('canvas');
+        var tempCtx = tempCanvas.getContext('2d');
+        var lineW = maskStrokeWidth;
+        tempCanvas.width = this.mask.w + lineW * 2;
+        tempCanvas.height = this.mask.h + lineW * 2;
+        tempCtx.fillStyle = maskStrokeColor;
+        this.mask.stroke = function () {
+            var dx = (_this.canvas.width - tempCanvas.width) / 2;
+            var dy = (_this.canvas.height - tempCanvas.height) / 2;
+            _this.ctx.drawImage(tempCanvas, dx, dy);
+        };
+        this.mask.image.onload = function () {
+            tempCtx.drawImage(_this.mask.image, 0, 0, tempCanvas.width, tempCanvas.height);
+            tempCtx.globalCompositeOperation = 'destination-out';
+            tempCtx.drawImage(_this.mask.image, lineW, lineW, tempCanvas.width - lineW * 2, tempCanvas.height - lineW * 2);
+            tempCtx.globalCompositeOperation = 'source-in';
+            tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+            _this.mask.stroke();
+        };
+        this.mask.image.src = maskPath;
+    };
+    /**
+     * Обновляет изображение в редакторе.
+     */
     AvatarEditor.prototype.render = function () {
         var _this = this;
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -151,7 +245,16 @@ var AvatarEditor = /** @class */ (function () {
             this.mask.stroke();
         }
     };
-    AvatarEditor.prototype.exportImage = function () {
+    /**
+     * Экспортирует текущее изображение из редактора в указанный формат.
+     * @param {("png"|"jpeg"|"bmp"|"webp")} format - Формат экспорта: "png", "jpeg", "bmp" или "webp".
+     * @param {number} [quality=1] - Качество изображения (для формата "jpeg" или "webp"). Должно быть в диапазоне от 0 до 1.
+     * @returns {string|false} - Строка, представляющая изображение в указанном формате, или false, если изображение отсутствует.
+     */
+    AvatarEditor.prototype.exportImage = function (format, quality) {
+        if (quality === void 0) { quality = 1.0; }
+        if (!this.image)
+            return false;
         if (!this.mask.image) {
             return this.canvas.toDataURL('image/png');
         }
@@ -162,8 +265,13 @@ var AvatarEditor = /** @class */ (function () {
         var dx = (this.canvas.width - this.mask.w) / 2;
         var dy = (this.canvas.height - this.mask.h) / 2;
         exportCtx.drawImage(this.image, this.imageX - dx, this.imageY - dy, this.image.width * this.imageScale, this.image.height * this.imageScale);
-        return exportCanvas.toDataURL('image/png');
+        return exportCanvas.toDataURL("image/".concat(format), quality);
     };
+    /**
+     * Отрисовывает текст в центре canvas.
+     * @param {string} text - Текст для отрисовки.
+     * @param {object} [options={}] - Дополнительные параметры для отрисовки текста.
+     */
     AvatarEditor.prototype.drawTextCentered = function (text, options) {
         if (options === void 0) { options = {}; }
         var style = __assign({ font: '18px Open Sans', color: 'black', width: "mask", canvasPadding: 20 }, options);
@@ -178,6 +286,14 @@ var AvatarEditor = /** @class */ (function () {
         this.wrapText(text, centerX, centerY, maxWidth);
         this.ctx.restore();
     };
+    /**
+     * Рисует текст автоматически перенося его на новую строку, если он вылез за пределы maxWidth.
+     * @param {string} text - Текст для отрисовки.
+     * @param {number} x - Координата x.
+     * @param {number} y - Координата y.
+     * @param {number} maxWidth - Максимальная ширина текста.
+     * @param {number} [lineHeight=1.2] - Межстрочный интервал.
+     */
     AvatarEditor.prototype.wrapText = function (text, x, y, maxWidth, lineHeight) {
         var _this = this;
         if (lineHeight === void 0) { lineHeight = 1.2; }
@@ -208,6 +324,18 @@ var AvatarEditor = /** @class */ (function () {
                 value.y = value.y - (offsetY - fontHeight * lineHeight) / 2;
             _this.ctx.fillText(value.text, x, value.y);
         });
+    };
+    /**
+     * Вычисляет расстояние между двумя касаниями.
+     * @private
+     * @param {Touch} touch1 - Первый палец.
+     * @param {Touch} touch2 - Второй палец.
+     * @returns {number} - Расстояние между двумя касаниями.
+     */
+    AvatarEditor.prototype.calculatePinchDistance = function (touch1, touch2) {
+        var dx = touch2.clientX - touch1.clientX;
+        var dy = touch2.clientY - touch1.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
     };
     return AvatarEditor;
 }());
