@@ -83,10 +83,13 @@ var AvatarEditor = /** @class */ (function () {
             _this.startDragX = e.clientX;
             _this.startDragY = e.clientY;
         });
-        // Конец перетаскивания
-        document.addEventListener('mouseup', function () {
+        var stopMoving = function () {
             _this.isDragging = false;
-        });
+        };
+        // Конец перетаскивания
+        document.addEventListener('mouseup', stopMoving);
+        document.addEventListener('mouseout', stopMoving);
+        document.addEventListener('mouseleave', stopMoving);
         // Перетаскивание изображения
         this.canvas.addEventListener('mousemove', function (e) {
             if (_this.isDragging) {
@@ -113,37 +116,24 @@ var AvatarEditor = /** @class */ (function () {
             _this.imageY = cursorY - (cursorY - _this.imageY) * scaleFactor;
             _this.render();
         });
+        // Начало перетаскивания пальцами
         this.canvas.addEventListener('touchstart', function (e) {
-            if (e.touches.length === 2) {
-                _this.isPinching = true;
-                _this.initialPinchDistance = _this.calculatePinchDistance(e.touches[0], e.touches[1]);
-            }
-            else if (e.touches.length === 1) {
-                var touch = e.touches[0];
+            var touch = e.touches[0];
+            var touchCount = e.touches.length;
+            if (touchCount === 1) {
                 _this.startDragX = touch.clientX;
                 _this.startDragY = touch.clientY;
             }
-        });
-        // Движение пальцев
-        this.canvas.addEventListener('touchmove', function (e) {
-            if (_this.isPinching && e.touches.length === 2) {
-                e.preventDefault();
-                var currentPinchDistance = _this.calculatePinchDistance(e.touches[0], e.touches[1]);
-                var scaleFactor = currentPinchDistance / _this.initialPinchDistance;
-                var centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                var centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                // Рассчитываем новый масштаб и положение
-                _this.imageScale *= scaleFactor;
-                // Определяем новое положение изображения
-                _this.imageX = centerX - (centerX - _this.imageX) * scaleFactor;
-                _this.imageY = centerY - (centerY - _this.imageY) * scaleFactor;
-                _this.render();
-                // Сохраните текущее расстояние для следующего кадра
-                _this.initialPinchDistance = currentPinchDistance;
-                // Сохраняем время последнего жеста
-                _this.lastGestureTime = new Date().getTime();
+            else if (touchCount === 2) {
+                _this.isPinching = true;
+                _this.initialPinchDistance = _this.calculatePinchDistance(e.touches[0], e.touches[1]);
             }
-            else if (e.touches.length === 1 && !_this.isPinching) {
+        });
+        // Перетаскивание и масштабирование пальцами
+        this.canvas.addEventListener('touchmove', function (e) {
+            e.preventDefault();
+            var touchCount = e.touches.length;
+            if (touchCount === 1 && !_this.isPinching) {
                 // Логика перемещения с одним пальцем
                 var touch = e.touches[0];
                 // Рассчитываем вектор перемещения
@@ -159,8 +149,27 @@ var AvatarEditor = /** @class */ (function () {
                 // Сохраняем время последнего жеста
                 _this.lastGestureTime = new Date().getTime();
             }
+            else if (touchCount === 2 && _this.isPinching) {
+                var currentPinchDistance = _this.calculatePinchDistance(e.touches[0], e.touches[1]);
+                var scaleFactor = currentPinchDistance / _this.initialPinchDistance;
+                var _a = _this.getTouchesCenter(e.touches[0], e.touches[1]), centerX = _a[0], centerY = _a[1];
+                // Рассчитываем новый масштаб и положение
+                _this.imageScale *= scaleFactor;
+                // Определяем новое положение изображения
+                _this.imageX = centerX - (centerX - _this.imageX) * scaleFactor;
+                _this.imageY = centerY - (centerY - _this.imageY) * scaleFactor;
+                _this.render();
+                // Сохраните текущее расстояние для следующего кадра
+                _this.initialPinchDistance = currentPinchDistance;
+                // Сохраняем время последнего жеста
+                _this.lastGestureTime = new Date().getTime();
+            }
         });
-        // Конец касания
+        var stopTouchMoving = function (currentTime) {
+            _this.isPinching = false;
+            _this.lastTap = currentTime;
+        };
+        // Конец перетаскивания пальцами или определение двойного касания
         this.canvas.addEventListener('touchend', function (e) {
             var currentTime = new Date().getTime();
             var tapLength = currentTime - _this.lastTap;
@@ -171,9 +180,11 @@ var AvatarEditor = /** @class */ (function () {
                     _this.avatarInput.click();
             }
             else {
-                _this.isPinching = false;
-                _this.lastTap = currentTime;
+                stopTouchMoving(currentTime);
             }
+        });
+        this.canvas.addEventListener('touchend', function () {
+            stopTouchMoving(new Date().getTime());
         });
     };
     /**
@@ -199,8 +210,7 @@ var AvatarEditor = /** @class */ (function () {
         tempCanvas.height = this.mask.h + lineW * 2;
         tempCtx.fillStyle = maskStrokeColor;
         this.mask.stroke = function () {
-            var dx = (_this.canvas.width - tempCanvas.width) / 2;
-            var dy = (_this.canvas.height - tempCanvas.height) / 2;
+            var _a = _this.getDrawCenterCoords(_this.canvas.width, _this.canvas.height, tempCanvas.width, tempCanvas.height), dx = _a[0], dy = _a[1];
             _this.ctx.drawImage(tempCanvas, dx, dy);
         };
         this.mask.image.onload = function () {
@@ -233,8 +243,7 @@ var AvatarEditor = /** @class */ (function () {
             this.ctx.save();
             // Обрезаем изображение с помощью маски
             this.ctx.globalCompositeOperation = 'destination-in';
-            var dx = (this.canvas.width - this.mask.w) / 2;
-            var dy = (this.canvas.height - this.mask.h) / 2;
+            var _a = this.getDrawCenterCoords(this.canvas.width, this.canvas.height, this.mask.w, this.mask.h), dx = _a[0], dy = _a[1];
             this.ctx.drawImage(this.mask.image, dx, dy, this.mask.w, this.mask.h);
             // Рисуем затемнение и затемнённое изображение
             this.ctx.globalCompositeOperation = 'destination-over';
@@ -262,8 +271,7 @@ var AvatarEditor = /** @class */ (function () {
         var exportCtx = exportCanvas.getContext('2d');
         exportCanvas.width = this.mask.w;
         exportCanvas.height = this.mask.h;
-        var dx = (this.canvas.width - this.mask.w) / 2;
-        var dy = (this.canvas.height - this.mask.h) / 2;
+        var _a = this.getDrawCenterCoords(this.canvas.width, this.canvas.height, this.mask.w, this.mask.h), dx = _a[0], dy = _a[1];
         exportCtx.drawImage(this.image, this.imageX - dx, this.imageY - dy, this.image.width * this.imageScale, this.image.height * this.imageScale);
         return exportCanvas.toDataURL("image/".concat(format), quality);
     };
@@ -277,8 +285,7 @@ var AvatarEditor = /** @class */ (function () {
         var style = __assign({ font: '18px Open Sans', color: 'black', width: "mask", canvasPadding: 20 }, options);
         var maxWidth = ((style.width === "mask" && this.mask.image) ? this.mask.w : this.canvas.width) - 2 * style.canvasPadding;
         this.ctx.save();
-        var centerX = this.canvas.width / 2;
-        var centerY = this.canvas.height / 2;
+        var _a = this.getCanvasCenter(this.canvas), centerX = _a[0], centerY = _a[1];
         this.ctx.font = style.font;
         this.ctx.fillStyle = style.color;
         this.ctx.textAlign = 'center';
@@ -336,6 +343,41 @@ var AvatarEditor = /** @class */ (function () {
         var dx = touch2.clientX - touch1.clientX;
         var dy = touch2.clientY - touch1.clientY;
         return Math.sqrt(dx * dx + dy * dy);
+    };
+    /**
+     * Вычисляет координаты средней точки между двумя касаниями.
+     * @private
+     * @param {Touch} touch1 - Первый палец.
+     * @param {Touch} touch2 - Второй палец.
+     * @returns {number[]} - Расстояние между двумя касаниями.
+     */
+    AvatarEditor.prototype.getTouchesCenter = function (touch1, touch2) {
+        var centerX = (touch1.clientX + touch2.clientX) / 2;
+        var centerY = (touch1.clientY + touch2.clientY) / 2;
+        return [centerX, centerY];
+    };
+    /**
+     * Вычисляет координаты для отрисоки элемента по центру.
+     * @private
+     * @param {number} canvasWidth - Ширина холста.
+     * @param {number} canvasHeight - Высота холста.
+     * @param {number} objectWidth - Ширина объекта.
+     * @param {number} objectHeight - Высота объекта.
+     * @returns {number[]} - Координаты для отрисовки элемента.
+     */
+    AvatarEditor.prototype.getDrawCenterCoords = function (canvasWidth, canvasHeight, objectWidth, objectHeight) {
+        var dx = (canvasWidth - objectWidth) / 2;
+        var dy = (canvasHeight - objectHeight) / 2;
+        return [dx, dy];
+    };
+    /**
+     * Возвращает координаты центра холста.
+     * @private
+     * @param {HTMLCanvasElement} canvas - Объект холста.
+     * @returns {number[]} - Координаты центра canvas.
+     */
+    AvatarEditor.prototype.getCanvasCenter = function (canvas) {
+        return [canvas.width / 2, canvas.height / 2];
     };
     return AvatarEditor;
 }());

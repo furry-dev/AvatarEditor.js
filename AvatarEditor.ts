@@ -171,10 +171,14 @@ class AvatarEditor {
             this.startDragY = e.clientY
         })
 
+        const stopMoving = () => {
+          this.isDragging = false
+        }
+
         // Конец перетаскивания
-        document.addEventListener('mouseup', () => {
-            this.isDragging = false
-        })
+        document.addEventListener('mouseup', stopMoving)
+        document.addEventListener('mouseout', stopMoving)
+        document.addEventListener('mouseleave', stopMoving)
 
         // Перетаскивание изображения
         this.canvas.addEventListener('mousemove', (e) => {
@@ -213,43 +217,25 @@ class AvatarEditor {
             this.render()
         })
 
+        // Начало перетаскивания пальцами
         this.canvas.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 2) {
-                this.isPinching = true
-                this.initialPinchDistance = this.calculatePinchDistance(e.touches[0], e.touches[1])
-            } else if (e.touches.length === 1) {
-                const touch = e.touches[0]
+            const touch = e.touches[0]
+            const touchCount = e.touches.length
+            if (touchCount === 1) {
                 this.startDragX = touch.clientX
                 this.startDragY = touch.clientY
+            } else if (touchCount === 2) {
+                this.isPinching = true
+                this.initialPinchDistance = this.calculatePinchDistance(e.touches[0], e.touches[1])
             }
         })
 
-        // Движение пальцев
+        // Перетаскивание и масштабирование пальцами
         this.canvas.addEventListener('touchmove', (e) => {
-            if (this.isPinching && e.touches.length === 2) {
-                e.preventDefault()
+            e.preventDefault()
+            const touchCount = e.touches.length
 
-                const currentPinchDistance = this.calculatePinchDistance(e.touches[0], e.touches[1])
-                const scaleFactor = currentPinchDistance / this.initialPinchDistance
-
-                const centerX = (e.touches[0].clientX + e.touches[1].clientX) / 2
-                const centerY = (e.touches[0].clientY + e.touches[1].clientY) / 2
-
-                // Рассчитываем новый масштаб и положение
-                this.imageScale *= scaleFactor
-
-                // Определяем новое положение изображения
-                this.imageX = centerX - (centerX - this.imageX) * scaleFactor
-                this.imageY = centerY - (centerY - this.imageY) * scaleFactor
-
-                this.render()
-
-                // Сохраните текущее расстояние для следующего кадра
-                this.initialPinchDistance = currentPinchDistance
-
-                // Сохраняем время последнего жеста
-                this.lastGestureTime = new Date().getTime()
-            } else if (e.touches.length === 1 && !this.isPinching) {
+            if (touchCount === 1 && !this.isPinching) {
                 // Логика перемещения с одним пальцем
                 const touch = e.touches[0]
 
@@ -269,10 +255,35 @@ class AvatarEditor {
 
                 // Сохраняем время последнего жеста
                 this.lastGestureTime = new Date().getTime()
+            } else if (touchCount === 2 && this.isPinching) {
+                const currentPinchDistance = this.calculatePinchDistance(e.touches[0], e.touches[1])
+                const scaleFactor = currentPinchDistance / this.initialPinchDistance
+
+                const [centerX, centerY] = this.getTouchesCenter(e.touches[0], e.touches[1])
+
+                // Рассчитываем новый масштаб и положение
+                this.imageScale *= scaleFactor
+
+                // Определяем новое положение изображения
+                this.imageX = centerX - (centerX - this.imageX) * scaleFactor
+                this.imageY = centerY - (centerY - this.imageY) * scaleFactor
+
+                this.render()
+
+                // Сохраните текущее расстояние для следующего кадра
+                this.initialPinchDistance = currentPinchDistance
+
+                // Сохраняем время последнего жеста
+                this.lastGestureTime = new Date().getTime()
             }
         })
 
-        // Конец касания
+        const stopTouchMoving = (currentTime: number) => {
+            this.isPinching = false
+            this.lastTap = currentTime
+        }
+
+        // Конец перетаскивания пальцами или определение двойного касания
         this.canvas.addEventListener('touchend', (e) => {
             const currentTime = new Date().getTime()
             const tapLength = currentTime - this.lastTap
@@ -282,9 +293,12 @@ class AvatarEditor {
                 e.preventDefault()
                 if (!this.isPinching && gestureTimeout > this.gestureTimeout) this.avatarInput.click()
             } else {
-                this.isPinching = false
-                this.lastTap = currentTime
+                stopTouchMoving(currentTime)
             }
+        })
+
+        this.canvas.addEventListener('touchend', () => {
+            stopTouchMoving(new Date().getTime())
         })
     }
 
@@ -315,8 +329,12 @@ class AvatarEditor {
         tempCtx.fillStyle = maskStrokeColor
 
         this.mask.stroke = () => {
-            const dx = (this.canvas.width - tempCanvas.width) / 2
-            const dy = (this.canvas.height - tempCanvas.height) / 2
+            const [dx, dy] = this.getDrawCenterCoords(
+                this.canvas.width,
+                this.canvas.height,
+                tempCanvas.width,
+                tempCanvas.height
+            )
 
             this.ctx.drawImage(tempCanvas, dx, dy)
         };
@@ -371,8 +389,7 @@ class AvatarEditor {
             // Обрезаем изображение с помощью маски
             this.ctx.globalCompositeOperation = 'destination-in'
 
-            const dx = (this.canvas.width - this.mask.w) / 2
-            const dy = (this.canvas.height - this.mask.h) / 2
+            const [dx, dy] = this.getDrawCenterCoords(this.canvas.width, this.canvas.height, this.mask.w, this.mask.h)
 
             this.ctx.drawImage(this.mask.image, dx, dy, this.mask.w, this.mask.h)
 
@@ -414,8 +431,7 @@ class AvatarEditor {
         exportCanvas.width = this.mask.w
         exportCanvas.height = this.mask.h
 
-        const dx = (this.canvas.width - this.mask.w) / 2
-        const dy = (this.canvas.height - this.mask.h) / 2
+        const [dx, dy] = this.getDrawCenterCoords(this.canvas.width, this.canvas.height, this.mask.w, this.mask.h)
 
         exportCtx.drawImage(
             this.image,
@@ -446,8 +462,7 @@ class AvatarEditor {
 
         this.ctx.save()
 
-        const centerX = this.canvas.width / 2
-        const centerY = this.canvas.height / 2
+        const [centerX, centerY] = this.getCanvasCenter(this.canvas)
 
         this.ctx.font = style.font
         this.ctx.fillStyle = style.color
@@ -510,5 +525,45 @@ class AvatarEditor {
         const dx = touch2.clientX - touch1.clientX
         const dy = touch2.clientY - touch1.clientY
         return Math.sqrt(dx * dx + dy * dy)
+    }
+
+    /**
+     * Вычисляет координаты средней точки между двумя касаниями.
+     * @private
+     * @param {Touch} touch1 - Первый палец.
+     * @param {Touch} touch2 - Второй палец.
+     * @returns {number[]} - Расстояние между двумя касаниями.
+     */
+    private getTouchesCenter(touch1: Touch, touch2: Touch): number[] {
+        const centerX = (touch1.clientX + touch2.clientX) / 2
+        const centerY = (touch1.clientY + touch2.clientY) / 2
+
+        return [centerX, centerY]
+    }
+
+    /**
+     * Вычисляет координаты для отрисоки элемента по центру.
+     * @private
+     * @param {number} canvasWidth - Ширина холста.
+     * @param {number} canvasHeight - Высота холста.
+     * @param {number} objectWidth - Ширина объекта.
+     * @param {number} objectHeight - Высота объекта.
+     * @returns {number[]} - Координаты для отрисовки элемента.
+     */
+    private getDrawCenterCoords(canvasWidth: number, canvasHeight: number, objectWidth: number, objectHeight: number): number[] {
+        const dx = (canvasWidth - objectWidth) / 2
+        const dy = (canvasHeight - objectHeight) / 2
+
+        return [dx, dy]
+    }
+
+    /**
+     * Возвращает координаты центра холста.
+     * @private
+     * @param {HTMLCanvasElement} canvas - Объект холста.
+     * @returns {number[]} - Координаты центра canvas.
+     */
+    private getCanvasCenter(canvas: HTMLCanvasElement): number[] {
+        return [canvas.width / 2, canvas.height / 2]
     }
 }
